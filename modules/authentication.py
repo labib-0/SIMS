@@ -3,6 +3,8 @@ from database import get_db_connection
 from utils.auth import encrypt_username, decrypt_username, verify_password, hash_password
 from utils.validators import is_valid_password
 from utils.helpers import log_audit
+from utils.animations import load_lottieurl
+from streamlit_lottie import st_lottie
 import datetime
 
 def init_session_state():
@@ -20,7 +22,14 @@ def init_session_state():
 
 def login_form():
     """Renders the login UI and handles authentication logic."""
-    st.markdown("<h2 style='text-align: center;'>🔒 SIMS Login</h2>", unsafe_allow_html=True)
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        lottie_login = load_lottieurl("https://assets5.lottiefiles.com/packages/lf20_dn6rwtwl.json")
+        if lottie_login:
+            st_lottie(lottie_login, height=150, key="login_lottie")
+        else:
+            st.markdown("<h2 style='text-align: center;'>🔒 SIMS Login</h2>", unsafe_allow_html=True)
+
     
     if st.session_state.show_forgot_password:
         forgot_password_ui()

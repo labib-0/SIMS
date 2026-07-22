@@ -3,9 +3,17 @@ import pandas as pd
 import plotly.express as px
 from database import get_db_connection
 import datetime
+from utils.animations import load_lottieurl
+from streamlit_lottie import st_lottie
 
 def render_dashboard():
-    st.title("📊 Dashboard")
+    col_lottie, col_title = st.columns([1, 11])
+    with col_lottie:
+        lottie_chart = load_lottieurl("https://assets9.lottiefiles.com/packages/lf20_vnikrcia.json")
+        if lottie_chart:
+            st_lottie(lottie_chart, height=60, key="dash_lottie")
+    with col_title:
+        st.title("**Dashboard Overview**")
     
     with get_db_connection() as conn:
         # Load metrics
@@ -46,43 +54,47 @@ def render_dashboard():
     col1, col2 = st.columns(2)
     
     with col1:
-        st.subheader("Sales Trend (Last 7 Days)")
-        with get_db_connection() as conn:
-            query = """
-                SELECT date(sale_date) as Date, SUM(final_amount) as Revenue
-                FROM sales
-                WHERE sale_date >= date('now', '-7 days')
-                GROUP BY date(sale_date)
-                ORDER BY Date ASC
-            """
-            sales_df = pd.read_sql_query(query, conn)
-        
-        if not sales_df.empty:
-            fig = px.line(sales_df, x="Date", y="Revenue", markers=True, title="Revenue Over Time")
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("No sales data available for the last 7 days.")
+        with st.container(border=True):
+            st.subheader("**Sales Trend (Last 7 Days)**")
+            with get_db_connection() as conn:
+                query = """
+                    SELECT date(sale_date) as Date, SUM(final_amount) as Revenue
+                    FROM sales
+                    WHERE sale_date >= date('now', '-7 days')
+                    GROUP BY date(sale_date)
+                    ORDER BY Date ASC
+                """
+                sales_df = pd.read_sql_query(query, conn)
+            
+            if not sales_df.empty:
+                fig = px.line(sales_df, x="Date", y="Revenue", markers=True, template="plotly_dark")
+                fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No sales data available for the last 7 days.")
 
     with col2:
-        st.subheader("Inventory Overview by Category")
-        with get_db_connection() as conn:
-            query = """
-                SELECT category as Category, SUM(current_stock) as Stock
-                FROM products
-                GROUP BY category
-            """
-            inv_df = pd.read_sql_query(query, conn)
-            
-        if not inv_df.empty:
-            fig = px.pie(inv_df, names="Category", values="Stock", hole=0.4, title="Stock Distribution")
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("No inventory data available.")
+        with st.container(border=True):
+            st.subheader("**Inventory Overview by Category**")
+            with get_db_connection() as conn:
+                query = """
+                    SELECT category as Category, SUM(current_stock) as Stock
+                    FROM products
+                    GROUP BY category
+                """
+                inv_df = pd.read_sql_query(query, conn)
+                
+            if not inv_df.empty:
+                fig = px.pie(inv_df, names="Category", values="Stock", hole=0.4, template="plotly_dark")
+                fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No inventory data available.")
     
     st.divider()
     
     # Recent Transactions
-    st.subheader("Recent Transactions")
+    st.subheader("**Recent Transactions**")
     with get_db_connection() as conn:
         query = """
             SELECT s.invoice_number, s.final_amount, s.sale_date, u.username_encrypted

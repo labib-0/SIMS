@@ -24,23 +24,64 @@ st.set_page_config(
 # Custom CSS for Modern Dashboard look
 st.markdown(f"""
     <style>
+    /* Animated Gradient Background */
+    @keyframes gradientBG {{
+        0% {{background-position: 0% 50%;}}
+        50% {{background-position: 100% 50%;}}
+        100% {{background-position: 0% 50%;}}
+    }}
     .stApp {{
-        background-color: var(--background-color);
+        background: linear-gradient(-45deg, #000000, #09090b, #171717, #0f172a);
+        background-size: 400% 400%;
+        animation: gradientBG 15s ease infinite;
+        color: #e2e8f0;
     }}
-    .metric-card {{
-        background-color: var(--secondary-background-color);
-        border-radius: 10px;
-        padding: 15px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    
+    /* Glassmorphism Cards */
+    .metric-card, div[data-testid="stMetric"] {{
+        background: rgba(255, 255, 255, 0.03);
+        backdrop-filter: blur(15px);
+        -webkit-backdrop-filter: blur(15px);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 15px;
+        padding: 20px;
+        box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5);
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
     }}
-    /* Quick fix for Streamlit metric styling */
+    .metric-card:hover, div[data-testid="stMetric"]:hover {{
+        transform: translateY(-5px);
+        box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.7);
+        background: rgba(255, 255, 255, 0.05);
+    }}
+    
+    /* Typography improvements for metrics */
     [data-testid="stMetricValue"] {{
-        font-size: 1.8rem;
-        color: {THEME_COLOR};
+        font-size: 2.2rem !important;
+        font-weight: 800 !important;
+        background: -webkit-linear-gradient(45deg, #818cf8, #c084fc);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }}
+    [data-testid="stMetricLabel"] {{
+        font-size: 1.1rem !important;
+        font-weight: 600 !important;
+        color: #cbd5e1 !important;
+    }}
+    
+    /* Headers */
+    h1, h2, h3, h4, h5, h6, .markdown-text-container {{
+        color: #ffffff !important;
+        font-weight: 800 !important;
+    }}
+    
+    /* Sidebar */
+    [data-testid="stSidebar"] {{
+        background: rgba(15, 23, 42, 0.8) !important;
+        backdrop-filter: blur(10px);
+        border-right: 1px solid rgba(255, 255, 255, 0.05);
     }}
     </style>
 """, unsafe_allow_html=True)
-
 # Initialize Database and Session State
 init_db()
 init_session_state()
