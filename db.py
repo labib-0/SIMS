@@ -732,15 +732,17 @@ def process_pos_checkout(cart_items: list, user_id: str) -> tuple[bool, str, dic
                 if int(p["quantity"]) < qty:
                     return False, f"Checkout failed: Insufficient stock for '{p['name']}'! Available: {p['quantity']}, Requested: {qty}", {}
 
+            base_tid = generate_transaction_id()
+
             # Execute transaction deduction
-            for item in cart_items:
+            for idx, item in enumerate(cart_items):
                 pid = item["product_id"]
                 qty = item["quantity"]
                 
                 cur = db.execute("SELECT * FROM products WHERE product_id = ?", (pid,))
                 p = db.fetchone(cur)
                 
-                tid = generate_transaction_id()
+                tid = base_tid
                 unit_price = float(p["price"])
                 item_total = round(unit_price * qty, 2)
                 grand_total += item_total
@@ -768,7 +770,7 @@ def process_pos_checkout(cart_items: list, user_id: str) -> tuple[bool, str, dic
 
             db.commit()
 
-        log_action(user_id, f"Processed Sale Invoice: {len(cart_items)} item(s) (Grand Total: ${grand_total:.2f})")
+        log_action(user_id, f"Processed Sale Invoice {base_tid}: {len(cart_items)} item(s) (Grand Total: ${grand_total:.2f})")
         
         invoice_data = {
             "date": trans_date,
@@ -788,6 +790,35 @@ def get_all_transactions():
             return db.fetchall(cur)
     except Exception:
         return []
+
+def get_invoice_data_by_trans_id(trans_id: str) -> dict | None:
+    """Retrieves invoice dictionary for any historical transaction ID."""
+    txs = get_all_transactions()
+    matching = [t for t in txs if str(t["trans_id"]).strip().lower() == str(trans_id).strip().lower()]
+    if not matching:
+        return None
+    
+    first = matching[0]
+    grand_total = sum(float(t["total_price"]) for t in matching)
+    
+    items = []
+    for t in matching:
+        items.append({
+            "trans_id": t["trans_id"],
+            "product_id": t["product_id"],
+            "product_name": t["product_name"],
+            "quantity": int(t["quantity"]),
+            "unit_price": float(t["unit_price"]),
+            "item_total": float(t["total_price"])
+        })
+        
+    return {
+        "date": first["date"],
+        "time": first["time"],
+        "sold_by": first["sold_by"],
+        "items": items,
+        "grand_total": round(grand_total, 2)
+    }
 
 # --- Reports & Analytics Queries ---
 
@@ -863,3 +894,183 @@ def get_audit_logs():
             return db.fetchall(cur)
     except Exception:
         return []
+
+
+# --- Backup & Restore (SQL Dump Export & Import) ---
+
+def export_sql_dump() -> str:
+    """Generates a complete SQL dump script for all system tables."""
+    now_str = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    lines = [
+        f"-- ========================================================",
+        f"-- SIMS Database Dump Export",
+        f"-- Export Date: {now_str}",
+        f"-- Active Engine: {get_active_db_type()}",
+        f"-- ========================================================",
+        "",
+        "DROP TABLE IF EXISTS audit_logs;",
+        "DROP TABLE IF EXISTS transactions;",
+        "DROP TABLE IF EXISTS products;",
+        "DROP TABLE IF EXISTS users;",
+        "",
+        "-- Table: users",
+        "CREATE TABLE users (",
+        "    user_id VARCHAR(20) PRIMARY KEY,",
+        "    full_name VARCHAR(100) NOT NULL,",
+        "    role VARCHAR(50) NOT NULL,",
+        "    dob VARCHAR(20) NOT NULL,",
+        "    email VARCHAR(100) NOT NULL,",
+        "    password VARCHAR(255) NOT NULL",
+        ");",
+        ""
+    ]
+
+    users = get_all_users()
+    if users:
+        lines.append("INSERT INTO users (user_id, full_name, role, dob, email, password) VALUES")
+        user_val_lines = []
+        for u in users:
+            fn = str(u['full_name']).replace("'", "''")
+            em = str(u['email']).replace("'", "''")
+            pw = str(u['password']).replace("'", "''")
+            user_val_lines.append(f"('{u['user_id']}', '{fn}', '{u['role']}', '{u['dob']}', '{em}', '{pw}')")
+        lines.append(",\n".join(user_val_lines) + ";")
+    lines.append("")
+
+    lines.extend([
+        "-- Table: products",
+        "CREATE TABLE products (",
+        "    product_id VARCHAR(20) PRIMARY KEY,",
+        "    name VARCHAR(100) NOT NULL,",
+        "    category VARCHAR(50) NOT NULL,",
+        "    price DECIMAL(10,2) NOT NULL,",
+        "    quantity INT NOT NULL,",
+        "    min_stock INT NOT NULL,",
+        "    restock_qty INT DEFAULT 0,",
+        "    stock_alert VARCHAR(50) DEFAULT '-'",
+        ");",
+        ""
+    ])
+
+    products = get_all_products()
+    if products:
+        lines.append("INSERT INTO products (product_id, name, category, price, quantity, min_stock, restock_qty, stock_alert) VALUES")
+        prod_val_lines = []
+        for p in products:
+            pn = str(p['name']).replace("'", "''")
+            pc = str(p['category']).replace("'", "''")
+            sa = str(p['stock_alert']).replace("'", "''")
+            prod_val_lines.append(f"('{p['product_id']}', '{pn}', '{pc}', {p['price']}, {p['quantity']}, {p['min_stock']}, {p['restock_qty']}, '{sa}')")
+        lines.append(",\n".join(prod_val_lines) + ";")
+    lines.append("")
+
+    lines.extend([
+        "-- Table: transactions",
+        "CREATE TABLE transactions (",
+        "    id INT AUTO_INCREMENT PRIMARY KEY,",
+        "    trans_id VARCHAR(30) NOT NULL,",
+        "    date VARCHAR(20) NOT NULL,",
+        "    time VARCHAR(20) NOT NULL,",
+        "    product_id VARCHAR(20) NOT NULL,",
+        "    product_name VARCHAR(100) NOT NULL,",
+        "    quantity INT NOT NULL,",
+        "    unit_price DECIMAL(10,2) NOT NULL,",
+        "    total_price DECIMAL(10,2) NOT NULL,",
+        "    sold_by VARCHAR(20) NOT NULL",
+        ");",
+        ""
+    ])
+
+    txs = get_all_transactions()
+    if txs:
+        lines.append("INSERT INTO transactions (trans_id, date, time, product_id, product_name, quantity, unit_price, total_price, sold_by) VALUES")
+        tx_val_lines = []
+        for t in txs:
+            pname = str(t['product_name']).replace("'", "''")
+            sb = str(t['sold_by']).replace("'", "''")
+            tx_val_lines.append(f"('{t['trans_id']}', '{t['date']}', '{t['time']}', '{t['product_id']}', '{pname}', {t['quantity']}, {t['unit_price']}, {t['total_price']}, '{sb}')")
+        lines.append(",\n".join(tx_val_lines) + ";")
+    lines.append("")
+
+    lines.extend([
+        "-- Table: audit_logs",
+        "CREATE TABLE audit_logs (",
+        "    id INT AUTO_INCREMENT PRIMARY KEY,",
+        "    timestamp VARCHAR(30) NOT NULL,",
+        "    user_id VARCHAR(20) NOT NULL,",
+        "    action TEXT NOT NULL",
+        ");",
+        ""
+    ])
+
+    logs = get_audit_logs()
+    if logs:
+        lines.append("INSERT INTO audit_logs (timestamp, user_id, action) VALUES")
+        log_val_lines = []
+        for l in logs:
+            act = str(l['action']).replace("'", "''")
+            log_val_lines.append(f"('{l['timestamp']}', '{l['user_id']}', '{act}')")
+        lines.append(",\n".join(log_val_lines) + ";")
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+def restore_sql_dump(sql_text: str, user_id: str) -> tuple[bool, str]:
+    """Parses and executes a SQL dump script to restore the database."""
+    if not sql_text or not sql_text.strip():
+        return False, "Uploaded SQL dump content is empty!"
+
+    # Clean comments and split by semicolon
+    statements = []
+    current_stmt = []
+    
+    for line in sql_text.splitlines():
+        line_clean = line.strip()
+        if not line_clean or line_clean.startswith("--") or line_clean.startswith("/*"):
+            continue
+        current_stmt.append(line)
+        if line_clean.endswith(";"):
+            stmt_str = "\n".join(current_stmt).strip()
+            if stmt_str:
+                statements.append(stmt_str)
+            current_stmt = []
+
+    if current_stmt:
+        stmt_str = "\n".join(current_stmt).strip()
+        if stmt_str:
+            statements.append(stmt_str)
+
+    if not statements:
+        return False, "No valid SQL statements found in the uploaded file!"
+
+    executed_count = 0
+    try:
+        with get_connection() as db:
+            for stmt in statements:
+                # Remove trailing semicolon
+                if stmt.endswith(";"):
+                    stmt = stmt[:-1].strip()
+                if not stmt:
+                    continue
+                    
+                # Convert MySQL types to SQLite if running on SQLite
+                if db.engine_type == "SQLITE":
+                    stmt = stmt.replace("AUTO_INCREMENT", "AUTOINCREMENT")
+                    stmt = stmt.replace("VARCHAR(20)", "TEXT")
+                    stmt = stmt.replace("VARCHAR(30)", "TEXT")
+                    stmt = stmt.replace("VARCHAR(50)", "TEXT")
+                    stmt = stmt.replace("VARCHAR(100)", "TEXT")
+                    stmt = stmt.replace("VARCHAR(255)", "TEXT")
+                    stmt = stmt.replace("DECIMAL(10,2)", "REAL")
+                    stmt = stmt.replace("INT", "INTEGER")
+                
+                db.execute(stmt)
+                executed_count += 1
+            db.commit()
+
+        log_action(user_id, f"Executed Database Restore from SQL Dump ({executed_count} statements)")
+        return True, f"Database restored successfully! Executed {executed_count} SQL statements."
+    except Exception as e:
+        return False, f"SQL import error at statement #{executed_count + 1}: {e}"
+
