@@ -508,18 +508,19 @@ with hdr_col2:
 query_scan = st.query_params.get("scan") or st.query_params.get("barcode") or st.query_params.get("qr")
 if query_scan and st.session_state.get("authenticated"):
     products_all = db.get_all_products()
-    matched_p = find_product_by_code(query_scan, products_all)
-    if matched_p:
-        st.session_state["pending_scan_product"] = matched_p
+    success, msg = process_scanned_code(query_scan, products_all)
+    if success:
+        st.session_state["scan_toast"] = msg
         st.session_state["current_page"] = "POS Terminal"
     else:
-        st.session_state["scan_error"] = f"❌ Scanned code '{query_scan}' not found in catalog."
+        st.session_state["scan_error"] = msg
         st.session_state["current_page"] = "POS Terminal"
     try:
         st.query_params.clear()
     except Exception:
         pass
     st.rerun()
+
 
 
 
@@ -731,98 +732,84 @@ elif page == "POS Terminal":
 
     products = db.get_all_products()
 
-    # ─────────────────────────────────────────────────────────────
-    #  INTERACTIVE SCANNED PRODUCT CONFIRMATION CARD
-    # ─────────────────────────────────────────────────────────────
-    if st.session_state.get("pending_scan_product"):
-        p_scanned = st.session_state["pending_scan_product"]
-        in_cart_qty = sum(item["quantity"] for item in st.session_state.cart if item["product_id"] == p_scanned["product_id"])
-        eff_avail = int(p_scanned["quantity"]) - in_cart_qty
-
-        st.markdown(f"""
-            <div style="background:linear-gradient(135deg, {t['accent2']}25, {t['accent3']}25);
-                border:2px solid {t['accent']};border-radius:16px;padding:20px;margin-bottom:20px;
-                box-shadow:0 10px 30px rgba(99,102,241,0.25);">
-                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
-                    <div style="display:flex;align-items:center;gap:14px;">
-                        <div style="font-size:2rem;background:{t['accent_glow']};width:52px;height:52px;
-                            border-radius:14px;display:flex;align-items:center;justify-content:center;">
-                            🛒
-                        </div>
-                        <div>
-                            <div style="font-size:1.15rem;font-weight:800;color:{t['text_heading']};">
-                                {p_scanned['name']} <span style="font-size:.85rem;color:{t['accent']};">({p_scanned['product_id']})</span>
-                            </div>
-                            <div style="font-size:.85rem;color:{t['text_muted']};margin-top:2px;">
-                                Category: {p_scanned['category']} &bull; Price: <strong style="color:{t['text_heading']};">${float(p_scanned['price']):.2f}</strong> &bull; Available Stock: <strong>{eff_avail}</strong>
-                            </div>
-                        </div>
-                    </div>
-                    <div style="font-size:1.4rem;font-weight:900;color:{t['success']};">
-                        ${float(p_scanned['price']):.2f} / unit
-                    </div>
-                </div>
-            </div>
-        """, unsafe_allow_html=True)
-
-        if eff_avail > 0:
-            c_confirm1, c_confirm2, c_confirm3 = st.columns([1.5, 2, 1.2])
-            with c_confirm1:
-                add_qty = st.number_input("Quantity to Add", min_value=1, max_value=eff_avail, value=1, key="confirm_scanned_qty_input")
-            with c_confirm2:
-                st.markdown("<div style='height:28px;'></div>", unsafe_allow_html=True)
-                if st.button(f"🛒 Add {add_qty}× to Cart (${float(p_scanned['price']) * add_qty:.2f})", type="primary", use_container_width=True, key="btn_add_scanned_cart"):
-                    success, msg = add_product_to_cart(p_scanned, add_qty)
-                    if success:
-                        st.toast(msg, icon="🛒")
-                        st.session_state["pending_scan_product"] = None
-                        st.rerun()
-                    else:
-                        st.error(msg)
-            with c_confirm3:
-                st.markdown("<div style='height:28px;'></div>", unsafe_allow_html=True)
-                if st.button("✕ Cancel & Rescan", use_container_width=True, key="btn_cancel_scanned"):
-                    st.session_state["pending_scan_product"] = None
-                    st.rerun()
-        else:
-            st.error(f"⚠️ '{p_scanned['name']}' is currently out of stock ({eff_avail} available).")
-            if st.button("✕ Dismiss & Rescan", key="btn_dismiss_out_of_stock"):
-                st.session_state["pending_scan_product"] = None
-                st.rerun()
-
     col_left, col_right = st.columns([1.6, 1])
 
     with col_left:
         # ─────────────────────────────────────────────────────────────
-        #  POS SCANNER (LIVE CAMERA & PRINTABLE CODES ONLY)
+        #  POS BARCODE & QR CODE SCANNER (FULL 5 TABS)
         # ─────────────────────────────────────────────────────────────
-        with st.expander("📱 **Live Camera & Barcode Scanner**", expanded=True):
-            scan_tab1, scan_tab2 = st.tabs([
-                "⚡ Live HTML5 Camera Scanner",
-                "🏷️ Printable Barcodes & QR Codes"
+        with st.expander("📱 **Scan Barcode or QR Code (Phone Camera & Web)**", expanded=True):
+            scan_tab1, scan_tab2, scan_tab3, scan_tab4, scan_tab5 = st.tabs([
+                "⚡ Live HTML5 Camera",
+                "📷 Photo Scan",
+                "⌨️ Hardware / Manual",
+                "🏷️ Printable QR & Barcodes",
+                "📱 Phone & Vercel Guide"
             ])
 
             with scan_tab1:
-                if st.session_state.get("pending_scan_product"):
-                    st.info("⏸️ **Camera paused while product confirmation is active above.** Select quantity & tap **Add to Cart** or **Cancel & Rescan** above to resume live camera scanning.")
-                else:
-                    st.markdown(f"""
-                        <div style="font-size:.85rem;color:{t['text_muted']};margin-bottom:10px;">
-                            Point your mobile camera at a barcode or QR code. It will detect the item and prompt you to choose quantity!
-                        </div>
-                    """, unsafe_allow_html=True)
+                st.markdown(f"""
+                    <div style="font-size:.85rem;color:{t['text_muted']};margin-bottom:10px;">
+                        Point your mobile camera at a barcode or QR code to scan and add items directly to your cart:
+                    </div>
+                """, unsafe_allow_html=True)
 
-                    scanned_val = live_qr_scanner(key="live_camera_scanner_widget")
+                scanned_val = live_qr_scanner(key="live_camera_scanner_widget")
 
-                    if scanned_val:
-                        matched_p = find_product_by_code(scanned_val, products)
-                        if matched_p:
-                            st.session_state["pending_scan_product"] = matched_p
-                            st.rerun()
-                        else:
-                            st.error(f"❌ Scanned code '{scanned_val}' not found in catalog.")
+                if scanned_val:
+                    success, msg = process_scanned_code(scanned_val, products)
+                    if success:
+                        st.toast(msg, icon="🛒")
+                        st.rerun()
+                    else:
+                        st.error(msg)
 
             with scan_tab2:
+                st.markdown(f"""
+                    <div style="font-size:.85rem;color:{t['text_muted']};margin-bottom:8px;">
+                        Point your mobile camera or webcam at a product's Barcode or QR Code, then tap capture:
+                    </div>
+                """, unsafe_allow_html=True)
+
+                cam_photo = st.camera_input("Take photo of Barcode / QR Code", key="pos_camera_photo_input")
+                if cam_photo:
+                    photo_bytes = cam_photo.getvalue()
+                    photo_hash = hashlib.md5(photo_bytes).hexdigest()
+                    if st.session_state.get("last_scanned_photo_hash") != photo_hash:
+                        st.session_state["last_scanned_photo_hash"] = photo_hash
+                        scanned_codes = decode_barcode_or_qr_from_image(cam_photo)
+                        if scanned_codes:
+                            added_any = False
+                            for code in scanned_codes:
+                                success, msg = process_scanned_code(code, products)
+                                if success:
+                                    st.toast(msg, icon="🛒")
+                                    added_any = True
+                                else:
+                                    st.error(msg)
+                            if added_any:
+                                st.rerun()
+                        else:
+                            st.warning("⚠️ No Barcode or QR code detected in photo. Ensure clear view and lighting.")
+
+            with scan_tab3:
+                st.markdown(f"""
+                    <div style="font-size:.85rem;color:{t['text_muted']};margin-bottom:8px;">
+                        Scan with a USB / Bluetooth Barcode Scanner Gun or type product ID / name:
+                    </div>
+                """, unsafe_allow_html=True)
+                with st.form("manual_scan_form", clear_on_submit=True):
+                    scanned_input = st.text_input("Product Barcode or ID", placeholder="e.g. P001, P007...", label_visibility="collapsed")
+                    btn_manual = st.form_submit_button("🛒 Add Scanned Item to Cart", type="primary", use_container_width=True)
+                    if btn_manual and scanned_input:
+                        success, msg = process_scanned_code(scanned_input, products)
+                        if success:
+                            st.toast(msg, icon="🛒")
+                            st.rerun()
+                        else:
+                            st.error(msg)
+
+            with scan_tab4:
                 btn_col1, btn_col2 = st.columns([2.5, 1])
                 with btn_col1:
                     st.markdown(f"""
@@ -859,6 +846,22 @@ elif page == "POS Terminal":
                                 </div>
                             </div>
                         """, unsafe_allow_html=True)
+
+            with scan_tab5:
+                st.markdown(f"""
+                    <div style="background:{t['card_bg']};border:1px solid {t['card_border']};border-radius:12px;padding:16px;color:{t['text_main']};">
+                        <h4 style="margin-top:0;color:{t['accent']};">📱 How to Scan Barcodes using Phone on Vercel</h4>
+                        <ol style="line-height:1.7;font-size:.9rem;padding-left:20px;">
+                            <li>Open your phone's web browser (<strong>Safari</strong> on iPhone or <strong>Chrome</strong> on Android).</li>
+                            <li>Visit your deployed Vercel URL (e.g., <code>https://your-sims-project.vercel.app</code>).</li>
+                            <li>Log in to SIMS and navigate to <strong>POS Terminal</strong>.</li>
+                            <li>Open the <strong>📱 Scan Barcode or QR Code</strong> section.</li>
+                            <li>Select <strong>⚡ Live HTML5 Camera</strong> or <strong>📷 Photo Scan</strong>.</li>
+                            <li>When prompted for camera permission, tap <strong>Allow</strong>.</li>
+                            <li>Point your phone camera at a product QR Code or Barcode. The item will automatically be added to your Shopping Cart!</li>
+                        </ol>
+                    </div>
+                """, unsafe_allow_html=True)
 
         st.markdown(f"""
             <div class="section-title" style="font-size:.95rem;margin-top:16px;">
