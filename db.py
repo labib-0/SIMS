@@ -697,7 +697,7 @@ def request_restock(product_id: str, req_qty: int, user_id: str) -> tuple[bool, 
 def generate_transaction_id() -> str:
     try:
         with get_connection() as db:
-            cur = db.execute("SELECT trans_id FROM transactions WHERE trans_id LIKE ? ORDER BY id DESC LIMIT 1", ("T%",))
+            cur = db.execute("SELECT trans_id FROM transactions WHERE trans_id LIKE ? ORDER BY trans_id DESC LIMIT 1", ("T%",))
             row = db.fetchone(cur)
             if row and str(row["trans_id"])[1:].isdigit():
                 num = int(str(row["trans_id"])[1:])
