@@ -814,40 +814,78 @@ elif page == "POS Terminal":
                     <script src="https://unpkg.com/html5-qrcode"></script>
                     <script>
                         let isProcessingScan = false;
+
+                        function redirectParentWithCode(code) {
+                            let parentOrigin = "";
+                            if (window.location.ancestorOrigins && window.location.ancestorOrigins.length > 0) {
+                                parentOrigin = window.location.ancestorOrigins[0];
+                            }
+                            if (!parentOrigin && document.referrer) {
+                                try {
+                                    parentOrigin = new URL(document.referrer).origin;
+                                } catch(e) {}
+                            }
+                            if (!parentOrigin) {
+                                try {
+                                    if (window.top && window.top.location && window.top.location.origin) {
+                                        parentOrigin = window.top.location.origin;
+                                    }
+                                } catch(e) {}
+                            }
+                            if (!parentOrigin) {
+                                parentOrigin = window.location.origin;
+                            }
+
+                            let targetPath = "/";
+                            try {
+                                if (window.top && window.top.location && window.top.location.pathname) {
+                                    targetPath = window.top.location.pathname;
+                                }
+                            } catch(e) {}
+
+                            const targetUrl = parentOrigin + targetPath + "?scan=" + encodeURIComponent(code);
+
+                            const resElem = document.getElementById("qr-reader-results");
+                            if (resElem) {
+                                resElem.innerHTML = '<div style="margin-top:10px;">' +
+                                    '<div style="font-size:15px; font-weight:700; color:#38bdf8; margin-bottom:8px;">✅ Code Detected: ' + code + '</div>' +
+                                    '<a href="' + targetUrl + '" target="_top" style="display:inline-block; background:#6366f1; color:#ffffff; font-weight:700; padding:10px 18px; border-radius:8px; text-decoration:none; box-shadow:0 4px 12px rgba(99,102,241,0.4);">👉 Click to Confirm (' + code + ')</a>' +
+                                    '</div>';
+                            }
+
+                            try {
+                                if (window.top) {
+                                    window.top.location.href = targetUrl;
+                                } else {
+                                    window.location.href = targetUrl;
+                                }
+                            } catch(err) {
+                                try {
+                                    const link = document.getElementById("scan_redirect_link");
+                                    if (link) {
+                                        link.href = targetUrl;
+                                        link.target = "_top";
+                                        link.click();
+                                    }
+                                } catch(err2) {
+                                    console.log('Redirecting fallback...', err2);
+                                }
+                            }
+                        }
+
                         function onScanSuccess(decodedText, decodedResult) {
                             if (isProcessingScan) return;
                             isProcessingScan = true;
-                            
-                            const resElem = document.getElementById('qr-reader-results');
-                            if (resElem) {
-                                resElem.innerText = '✅ Code Detected: ' + decodedText + ' — Opening confirmation...';
-                            }
-                            
+
                             try {
                                 if (typeof html5QrcodeScanner !== 'undefined' && html5QrcodeScanner) {
                                     html5QrcodeScanner.clear();
                                 }
                             } catch(e) {}
-                            
+
                             setTimeout(function() {
-                                try {
-                                    const link = document.getElementById('scan_redirect_link');
-                                    link.href = '?scan=' + encodeURIComponent(decodedText);
-                                    link.click();
-                                } catch(e) {
-                                    try {
-                                        if (window.top) {
-                                            const currentUrl = new URL(window.top.location.href);
-                                            currentUrl.searchParams.set('scan', decodedText);
-                                            window.top.location.href = currentUrl.toString();
-                                        } else {
-                                            window.location.search = '?scan=' + encodeURIComponent(decodedText);
-                                        }
-                                    } catch(e2) {
-                                        console.log('Redirecting fallback...', e2);
-                                    }
-                                }
-                            }, 150);
+                                redirectParentWithCode(decodedText);
+                            }, 100);
                         }
 
                         let html5QrcodeScanner = new Html5QrcodeScanner(
