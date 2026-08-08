@@ -1094,16 +1094,15 @@ elif page == "POS Terminal":
 
             ic1, ic2 = st.columns([2, 1])
             with ic1:
-                st.components.v1.html(
-                    """<button onclick="window.parent.print()"
-                        style="background:linear-gradient(135deg,#4f46e5,#7c3aed); color:#ffffff;
-                        font-family:'Inter',sans-serif; font-weight:700; border:none; padding:12px 24px;
-                        border-radius:12px; cursor:pointer; width:100%; height:46px; font-size:15px;
-                        box-shadow:0 4px 14px rgba(79,70,229,0.3); transition:all 0.2s ease;">
-                        🖨️ Print Receipt
-                    </button>""",
-                    height=56,
-                )
+                if "last_pdf_bytes" in st.session_state:
+                    st.download_button(
+                        "📥 Download / Print Receipt (PDF)",
+                        data=st.session_state.last_pdf_bytes,
+                        file_name=f"Invoice_{main_tid}.pdf",
+                        mime="application/pdf",
+                        type="primary",
+                        use_container_width=True,
+                    )
             with ic2:
                 if st.button("✕ Close", key="btn_close_inv", use_container_width=True):
                     del st.session_state.last_invoice
