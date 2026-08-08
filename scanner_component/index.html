@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <script src="https://unpkg.com/html5-qrcode"></script>
+    <style>
+        body { margin: 0; padding: 0; background: transparent; font-family: system-ui, -apple-system, sans-serif; }
+        #qr-container { background: #0b0f19; padding: 16px; border-radius: 12px; text-align: center; color: #f8fafc; border: 1px solid #1e293b; }
+        #qr-reader { width: 100%; max-width: 400px; margin: 0 auto; border-radius: 8px; overflow: hidden; }
+        #qr-reader-results { margin-top: 12px; font-weight: 600; font-size: 14px; color: #38bdf8; }
+    </style>
+</head>
+<body>
+    <div id="qr-container">
+        <div id="qr-reader"></div>
+        <div id="qr-reader-results">🎥 Camera Active — Align Barcode or QR Code</div>
+    </div>
+
+    <script>
+        function sendToStreamlit(value) {
+            window.parent.postMessage({
+                isStreamlitMessage: true,
+                type: "streamlit:setComponentValue",
+                value: value
+            }, "*");
+        }
+
+        function setStreamlitHeight(height) {
+            window.parent.postMessage({
+                isStreamlitMessage: true,
+                type: "streamlit:setFrameHeight",
+                height: height || document.body.scrollHeight
+            }, "*");
+        }
+
+        let isProcessing = false;
+
+        function onScanSuccess(decodedText, decodedResult) {
+            if (isProcessing) return;
+            isProcessing = true;
+
+            const resElem = document.getElementById("qr-reader-results");
+            if (resElem) {
+                resElem.innerText = "✅ Code Detected: " + decodedText + " — Opening confirmation...";
+            }
+
+            try {
+                if (typeof html5QrcodeScanner !== "undefined" && html5QrcodeScanner) {
+                    html5QrcodeScanner.clear();
+                }
+            } catch(e) {}
+
+            setTimeout(function() {
+                sendToStreamlit(decodedText);
+            }, 100);
+        }
+
+        window.addEventListener("load", function() {
+            setStreamlitHeight(430);
+            try {
+                let html5QrcodeScanner = new Html5QrcodeScanner(
+                    "qr-reader",
+                    { fps: 10, qrbox: { width: 250, height: 250 }, rememberLastUsedCamera: true },
+                    /* verbose= */ false
+                );
+                html5QrcodeScanner.render(onScanSuccess);
+            } catch(err) {
+                console.error("Scanner init error:", err);
+            }
+        });
+    </script>
+</body>
+</html>

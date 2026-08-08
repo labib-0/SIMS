@@ -243,6 +243,12 @@ def generate_barcode_svg_base64(code_text, format_type="qrcode"):
         return ""
 
 
+import streamlit.components.v1 as components
+SCANNER_COMPONENT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scanner_component")
+live_qr_scanner = components.declare_component("live_qr_scanner", path=SCANNER_COMPONENT_DIR)
+
+
+
 
 
 # ─────────────────────────────────────────────────────────────
@@ -805,52 +811,16 @@ elif page == "POS Terminal":
                             Point your mobile camera at a barcode or QR code. It will detect the item and prompt you to choose quantity!
                         </div>
                     """, unsafe_allow_html=True)
-                    html5_code = """
-                    <div style="background:#0b0f19; padding:16px; border-radius:12px; text-align:center; color:#f8fafc; font-family:sans-serif; border:1px solid #1e293b;">
-                        <div id="qr-reader" style="width:100%; max-width:400px; margin:0 auto; border-radius:8px; overflow:hidden;"></div>
-                        <div id="qr-reader-results" style="margin-top:12px; font-weight:600; font-size:14px; color:#38bdf8;">🎥 Camera Active — Align Barcode or QR Code</div>
-                    </div>
 
-                    <script src="https://unpkg.com/html5-qrcode"></script>
-                    <script>
-                        let isProcessingScan = false;
-                        function onScanSuccess(decodedText, decodedResult) {
-                            if (isProcessingScan) return;
-                            isProcessingScan = true;
-                            
-                            const resElem = document.getElementById('qr-reader-results');
-                            if (resElem) {
-                                resElem.innerText = '✅ Code Detected: ' + decodedText + ' — Opening confirmation...';
-                            }
-                            
-                            try {
-                                if (typeof html5QrcodeScanner !== 'undefined' && html5QrcodeScanner) {
-                                    html5QrcodeScanner.clear();
-                                }
-                            } catch(e) {}
-                            
-                            setTimeout(function() {
-                                try {
-                                    if (window.top) {
-                                        const currentUrl = new URL(window.top.location.href);
-                                        currentUrl.searchParams.set('scan', decodedText);
-                                        window.top.location.href = currentUrl.toString();
-                                    }
-                                } catch(e) {
-                                    console.log('Redirecting fallback...', e);
-                                }
-                            }, 150);
-                        }
+                    scanned_val = live_qr_scanner(key="live_camera_scanner_widget")
 
-                        let html5QrcodeScanner = new Html5QrcodeScanner(
-                            "qr-reader",
-                            { fps: 10, qrbox: { width: 250, height: 250 }, rememberLastUsedCamera: true },
-                            /* verbose= */ false
-                        );
-                        html5QrcodeScanner.render(onScanSuccess);
-                    </script>
-                    """
-                    st.components.v1.html(html5_code, height=440, scrolling=False)
+                    if scanned_val:
+                        matched_p = find_product_by_code(scanned_val, products)
+                        if matched_p:
+                            st.session_state["pending_scan_product"] = matched_p
+                            st.rerun()
+                        else:
+                            st.error(f"❌ Scanned code '{scanned_val}' not found in catalog.")
 
             with scan_tab2:
                 btn_col1, btn_col2 = st.columns([2.5, 1])
