@@ -797,41 +797,60 @@ elif page == "POS Terminal":
             ])
 
             with scan_tab1:
-                st.markdown(f"""
-                    <div style="font-size:.85rem;color:{t['text_muted']};margin-bottom:10px;">
-                        Point your mobile camera at a barcode or QR code. It will detect the item and prompt you to choose quantity!
+                if st.session_state.get("pending_scan_product"):
+                    st.info("⏸️ **Camera paused while product confirmation is active above.** Select quantity & tap **Add to Cart** or **Cancel & Rescan** above to resume live camera scanning.")
+                else:
+                    st.markdown(f"""
+                        <div style="font-size:.85rem;color:{t['text_muted']};margin-bottom:10px;">
+                            Point your mobile camera at a barcode or QR code. It will detect the item and prompt you to choose quantity!
+                        </div>
+                    """, unsafe_allow_html=True)
+                    html5_code = """
+                    <div style="background:#0b0f19; padding:16px; border-radius:12px; text-align:center; color:#f8fafc; font-family:sans-serif; border:1px solid #1e293b;">
+                        <div id="qr-reader" style="width:100%; max-width:400px; margin:0 auto; border-radius:8px; overflow:hidden;"></div>
+                        <div id="qr-reader-results" style="margin-top:12px; font-weight:600; font-size:14px; color:#38bdf8;">🎥 Camera Active — Align Barcode or QR Code</div>
                     </div>
-                """, unsafe_allow_html=True)
-                html5_code = """
-                <div style="background:#0b0f19; padding:16px; border-radius:12px; text-align:center; color:#f8fafc; font-family:sans-serif; border:1px solid #1e293b;">
-                    <div id="qr-reader" style="width:100%; max-width:400px; margin:0 auto; border-radius:8px; overflow:hidden;"></div>
-                    <div id="qr-reader-results" style="margin-top:12px; font-weight:600; font-size:14px; color:#38bdf8;">🎥 Camera Initializing...</div>
-                </div>
 
-                <script src="https://unpkg.com/html5-qrcode"></script>
-                <script>
-                    function onScanSuccess(decodedText, decodedResult) {
-                        document.getElementById('qr-reader-results').innerText = '✅ Scanned: ' + decodedText;
-                        try {
-                            if (window.top) {
-                                const currentUrl = new URL(window.top.location.href);
-                                currentUrl.searchParams.set('scan', decodedText);
-                                window.top.location.href = currentUrl.toString();
+                    <script src="https://unpkg.com/html5-qrcode"></script>
+                    <script>
+                        let isProcessingScan = false;
+                        function onScanSuccess(decodedText, decodedResult) {
+                            if (isProcessingScan) return;
+                            isProcessingScan = true;
+                            
+                            const resElem = document.getElementById('qr-reader-results');
+                            if (resElem) {
+                                resElem.innerText = '✅ Code Detected: ' + decodedText + ' — Opening confirmation...';
                             }
-                        } catch(e) {
-                            console.log('Redirecting fallback...', e);
+                            
+                            try {
+                                if (typeof html5QrcodeScanner !== 'undefined' && html5QrcodeScanner) {
+                                    html5QrcodeScanner.clear();
+                                }
+                            } catch(e) {}
+                            
+                            setTimeout(function() {
+                                try {
+                                    if (window.top) {
+                                        const currentUrl = new URL(window.top.location.href);
+                                        currentUrl.searchParams.set('scan', decodedText);
+                                        window.top.location.href = currentUrl.toString();
+                                    }
+                                } catch(e) {
+                                    console.log('Redirecting fallback...', e);
+                                }
+                            }, 150);
                         }
-                    }
 
-                    let html5QrcodeScanner = new Html5QrcodeScanner(
-                        "qr-reader",
-                        { fps: 10, qrbox: { width: 250, height: 250 }, rememberLastUsedCamera: true },
-                        /* verbose= */ false
-                    );
-                    html5QrcodeScanner.render(onScanSuccess);
-                </script>
-                """
-                st.components.v1.html(html5_code, height=440, scrolling=False)
+                        let html5QrcodeScanner = new Html5QrcodeScanner(
+                            "qr-reader",
+                            { fps: 10, qrbox: { width: 250, height: 250 }, rememberLastUsedCamera: true },
+                            /* verbose= */ false
+                        );
+                        html5QrcodeScanner.render(onScanSuccess);
+                    </script>
+                    """
+                    st.components.v1.html(html5_code, height=440, scrolling=False)
 
             with scan_tab2:
                 btn_col1, btn_col2 = st.columns([2.5, 1])
