@@ -147,3 +147,119 @@ def generate_invoice_pdf(invoice_data: dict) -> tuple[bytes, str]:
         pdf_bytes = f.read()
 
     return pdf_bytes, file_path
+
+
+def generate_barcode_catalog_pdf(products: list) -> tuple[bytes, str]:
+    """
+    Generates a professional Printable PDF Barcode & QR Code sheet for all products in catalog.
+    Saves to 'invoices/SIMS_Product_Barcodes_Catalog.pdf' and returns (pdf_bytes, file_path).
+    """
+    os.makedirs(INVOICE_DIR, exist_ok=True)
+    filename = "SIMS_Product_Barcodes_Catalog.pdf"
+    file_path = os.path.join(INVOICE_DIR, filename)
+
+    doc = SimpleDocTemplate(
+        file_path,
+        pagesize=letter,
+        rightMargin=36,
+        leftMargin=36,
+        topMargin=36,
+        bottomMargin=36
+    )
+
+    styles = getSampleStyleSheet()
+
+    title_style = ParagraphStyle(
+        'CatalogTitle',
+        parent=styles['Heading1'],
+        fontName='Helvetica-Bold',
+        fontSize=20,
+        leading=24,
+        textColor=colors.HexColor('#18181b'),
+        alignment=1
+    )
+
+    sub_style = ParagraphStyle(
+        'CatalogSub',
+        parent=styles['Normal'],
+        fontName='Helvetica',
+        fontSize=9.5,
+        leading=13,
+        textColor=colors.HexColor('#64748b'),
+        alignment=1
+    )
+
+    item_style = ParagraphStyle(
+        'ItemStyle',
+        parent=styles['Normal'],
+        fontName='Helvetica',
+        fontSize=9.5,
+        leading=14,
+        textColor=colors.HexColor('#1e293b')
+    )
+
+    elements = []
+
+    # Title & Subtitle
+    elements.append(Paragraph('SIMS ENTERPRISE', title_style))
+    elements.append(Paragraph('Official Printable Product Barcodes & QR Codes Catalog Sheet', sub_style))
+    elements.append(Spacer(1, 10))
+    elements.append(HRFlowable(width="100%", thickness=2, color=colors.HexColor('#6366f1'), spaceAfter=14))
+
+    headers = ['Product Description', '2D QR Code', '1D Barcode (Code128)']
+    rows = [[
+        Paragraph(f'<b>{h}</b>', ParagraphStyle('HStyle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10, textColor=colors.white, alignment=0 if idx == 0 else 1))
+        for idx, h in enumerate(headers)
+    ]]
+
+    from reportlab.graphics.barcode import code128, qr
+    from reportlab.graphics.shapes import Drawing
+
+    for p in products:
+        p_name = p.get('name', 'Product')
+        p_id = p.get('product_id', 'P000')
+        p_cat = p.get('category', 'General')
+        p_price = float(p.get('price', 0.0))
+        p_stock = int(p.get('quantity', 0))
+
+        info_html = (
+            f"<b>{p_name}</b><br/>"
+            f"<font color='#6366f1'><b>ID: {p_id}</b></font> &bull; Category: {p_cat}<br/>"
+            f"Price: <b>${p_price:.2f}</b> &bull; Stock: {p_stock}"
+        )
+        info_p = Paragraph(info_html, item_style)
+
+        # Generate QR Code
+        qr_w = qr.QrCodeWidget(p_id)
+        bounds = qr_w.getBounds()
+        w, h = bounds[2] - bounds[0], bounds[3] - bounds[1]
+        d_qr = Drawing(52, 52, transform=[52.0/w, 0, 0, 52.0/h, 0, 0])
+        d_qr.add(qr_w)
+
+        # Generate 1D Code128 Barcode
+        d_bc = code128.Code128(p_id, barHeight=24, barWidth=0.95)
+
+        rows.append([info_p, d_qr, d_bc])
+
+    item_table = Table(rows, colWidths=[230, 130, 180])
+    item_table.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#18181b')),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#cbd5e1')),
+        ('ALIGN', (1,1), (-1,-1), 'CENTER'),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('PADDING', (0,0), (-1,-1), 6),
+        ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#f8fafc')])
+    ]))
+
+    elements.append(item_table)
+    elements.append(Spacer(1, 16))
+    footer_text = "SIMS Stock & Inventory Management System • Generated Printable Barcode Sheet"
+    elements.append(Paragraph(footer_text, ParagraphStyle('Foot', fontName='Helvetica-Oblique', fontSize=8.5, alignment=1, textColor=colors.HexColor('#94a3b8'))))
+
+    doc.build(elements)
+
+    with open(file_path, "rb") as f:
+        pdf_bytes = f.read()
+
+    return pdf_bytes, file_path
+

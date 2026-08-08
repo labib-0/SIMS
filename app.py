@@ -834,13 +834,28 @@ elif page == "POS Terminal":
                 st.components.v1.html(html5_code, height=440, scrolling=False)
 
             with scan_tab2:
-                st.markdown(f"""
-                    <div style="font-size:.85rem;color:{t['text_muted']};margin-bottom:12px;">
-                        <strong>Product Barcodes & QR Codes Catalog:</strong> Scan these codes with your phone live camera!
-                    </div>
-                """, unsafe_allow_html=True)
+                btn_col1, btn_col2 = st.columns([2.5, 1])
+                with btn_col1:
+                    st.markdown(f"""
+                        <div style="font-size:.85rem;color:{t['text_muted']};margin-bottom:8px;">
+                            <strong>Product Barcodes & QR Codes Catalog:</strong> Scan these codes on screen or generate a PDF printable sheet for all products!
+                        </div>
+                    """, unsafe_allow_html=True)
+                with btn_col2:
+                    pdf_bytes, pdf_file_path = pdf_generator.generate_barcode_catalog_pdf(products)
+                    st.download_button(
+                        label="🖨️ Print Now (PDF)",
+                        data=pdf_bytes,
+                        file_name="SIMS_Product_Barcodes_Catalog.pdf",
+                        mime="application/pdf",
+                        type="primary",
+                        use_container_width=True,
+                        key="btn_download_barcode_catalog"
+                    )
+
+                st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
                 cols_b = st.columns(3)
-                for idx, p in enumerate(products[:12]):
+                for idx, p in enumerate(products):
                     c_idx = idx % 3
                     with cols_b[c_idx]:
                         qr_uri = generate_barcode_svg_base64(p["product_id"], "qrcode")
