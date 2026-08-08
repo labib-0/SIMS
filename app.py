@@ -655,10 +655,75 @@ if page == "Dashboard":
                     height=290, barmode="overlay", bargap=0.25,
                     xaxis_tickangle=-30,
                 )
-                fig_stock.update_layout(legend=dict(orientation="h", y=1.1))
-                st.plotly_chart(fig_stock, use_container_width=True)
             else:
-                    products = db.get_all_products()
+                st.plotly_chart(empty_plotly_chart("Stock Level Overview",
+                    "No products added yet"), use_container_width=True)
+
+    with chart_col4:
+        with st.container(border=True):
+            st.markdown(styles.render_section_title("Sales by Category",
+                icons.get_icon("currency", 17, t["accent"])), unsafe_allow_html=True)
+
+            df_tx2 = pd.DataFrame(transactions) if transactions else pd.DataFrame()
+            df_prod2 = pd.DataFrame(products) if products else pd.DataFrame()
+
+            if not df_tx2.empty and not df_prod2.empty and "product_id" in df_tx2.columns:
+                merged = df_tx2.merge(df_prod2[["product_id","category"]], on="product_id", how="left")
+                cat_sales = merged.groupby("category")["total_price"].sum().reset_index()
+                fig_cat = px.bar(
+                    cat_sales.sort_values("total_price", ascending=False),
+                    x="category", y="total_price",
+                    color="category",
+                    color_discrete_sequence=palette,
+                    labels={"category": "Category", "total_price": "Revenue ($)"},
+                )
+                fig_cat.update_layout(
+                    **styles.get_plotly_layout(t),
+                    height=290,
+                    showlegend=False,
+                    xaxis_tickangle=-20,
+                )
+                fig_cat.update_traces(
+                    hovertemplate="<b>%{x}</b><br>$%{y:,.2f}<extra></extra>",
+                )
+                st.plotly_chart(fig_cat, use_container_width=True)
+            else:
+                st.plotly_chart(empty_plotly_chart("Sales by Category",
+                    "No sales data available yet"), use_container_width=True)
+
+    # — ACTIVITY FEED —
+    st.markdown(styles.render_section_title("Recent System Activity",
+        icons.get_icon("activity", 17, t["accent"])), unsafe_allow_html=True)
+
+    if logs:
+        for l in logs[:8]:
+            st.markdown(styles.render_activity_item(
+                l["timestamp"], l["user_id"], l["action"]
+            ), unsafe_allow_html=True)
+    else:
+        st.markdown(f"""
+            <div class="activity-item" style="text-align:center;color:{t['text_sub']};border-left:3px solid {t['card_border']};">
+                No activity recorded yet.
+            </div>
+        """, unsafe_allow_html=True)
+
+
+# ──────────────────────────────────────────────────────────────
+#  2. POS TERMINAL
+# ──────────────────────────────────────────────────────────────
+elif page == "POS Terminal":
+    st.markdown(styles.render_section_title("POS Terminal & Checkout",
+        icons.get_icon("pos", 20, t["accent"])), unsafe_allow_html=True)
+
+    if "scan_toast" in st.session_state and st.session_state.scan_toast:
+        st.toast(st.session_state.scan_toast, icon="🛒")
+        st.session_state.scan_toast = None
+
+    if "scan_error" in st.session_state and st.session_state.scan_error:
+        st.error(st.session_state.scan_error)
+        st.session_state.scan_error = None
+
+    products = db.get_all_products()
 
     # ─────────────────────────────────────────────────────────────
     #  INTERACTIVE SCANNED PRODUCT CONFIRMATION CARD
