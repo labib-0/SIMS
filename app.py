@@ -245,9 +245,12 @@ def generate_barcode_svg_base64(code_text, format_type="qrcode"):
 
 
 
-
-
-
+import streamlit.components.v1 as components
+try:
+    live_qr_scanner = components.declare_component("live_qr_scanner", path="scanner_component")
+except Exception as e:
+    # Fallback if component path is missing
+    live_qr_scanner = None
 
 # ─────────────────────────────────────────────────────────────
 #  AUTHENTICATION — LOGIN & FORGOT PASSWORD
@@ -808,110 +811,19 @@ elif page == "POS Terminal":
                 catalog_dict = {p["product_id"]: {"name": p["name"], "price": float(p["price"])} for p in products}
                 catalog_json_str = json.dumps(catalog_dict)
 
-                html5_code = f"""
-                <div style="background:#0b0f19; padding:16px; border-radius:12px; text-align:center; color:#f8fafc; font-family:sans-serif; border:1px solid #1e293b;">
-                    <div id="qr-reader" style="width:100%; max-width:400px; margin:0 auto; border-radius:8px; overflow:hidden;"></div>
-                    <div id="qr-reader-results" style="margin-top:12px; font-weight:600; font-size:14px; color:#38bdf8;">🎥 Live Camera Active — Align Barcode or QR Code</div>
-                    <a id="scan_redirect_link" href="#" target="_top" style="display:none;"></a>
-                </div>
-
-                <script src="https://unpkg.com/html5-qrcode"></script>
-                <script>
-                    let isProcessingScan = false;
-                    const catalogMap = {catalog_json_str};
-
-                    function redirectParentWithCode(code) {{
-                        let itemInfo = catalogMap[code] || catalogMap[code.toUpperCase()];
-                        let displayName = code;
-                        let priceStr = "";
-                        if (itemInfo) {{
-                            displayName = itemInfo.name + " (" + code + ")";
-                            priceStr = " — $" + Number(itemInfo.price).toFixed(2);
-                        }} else {{
-                            displayName = "Code: " + code;
-                        }}
-
-                        let parentOrigin = "";
-                        if (window.location.ancestorOrigins && window.location.ancestorOrigins.length > 0) {{
-                            parentOrigin = window.location.ancestorOrigins[0];
-                        }}
-                        if (!parentOrigin && document.referrer) {{
-                            try {{
-                                parentOrigin = new URL(document.referrer).origin;
-                            }} catch(e) {{}}
-                        }}
-                        if (!parentOrigin) {{
-                            try {{
-                                if (window.top && window.top.location && window.top.location.origin) {{
-                                    parentOrigin = window.top.location.origin;
-                                }}
-                            }} catch(e) {{}}
-                        }}
-                        if (!parentOrigin) {{
-                            parentOrigin = window.location.origin;
-                        }}
-
-                        let targetPath = "/";
-                        try {{
-                            if (window.top && window.top.location && window.top.location.pathname) {{
-                                targetPath = window.top.location.pathname;
-                            }}
-                        }} catch(e) {{}}
-
-                        const targetUrl = parentOrigin + targetPath + "?scan=" + encodeURIComponent(code);
-
-                        const resElem = document.getElementById("qr-reader-results");
-                        if (resElem) {{
-                            resElem.innerHTML = '<div style="margin-top:10px;">' +
-                                '<div style="font-size:15px; font-weight:800; color:#38bdf8; margin-bottom:10px;">✅ Scanned: ' + displayName + '</div>' +
-                                '<a href="' + targetUrl + '" target="_top" style="display:inline-block; background:linear-gradient(135deg,#6366f1,#8b5cf6); color:#ffffff; font-weight:800; padding:12px 22px; border-radius:10px; text-decoration:none; box-shadow:0 6px 18px rgba(99,102,241,0.45); font-size:14px;">🛒 Add to Cart: ' + displayName + priceStr + '</a>' +
-                                '</div>';
-                        }}
-
-                        try {{
-                            if (window.top) {{
-                                window.top.location.href = targetUrl;
-                            }} else {{
-                                window.location.href = targetUrl;
-                            }}
-                        }} catch(err) {{
-                            try {{
-                                const link = document.getElementById("scan_redirect_link");
-                                if (link) {{
-                                    link.href = targetUrl;
-                                    link.target = "_top";
-                                    link.click();
-                                }}
-                            }} catch(err2) {{
-                                console.log('Redirecting fallback...', err2);
-                            }}
-                        }}
-                    }}
-
-                    function onScanSuccess(decodedText, decodedResult) {{
-                        if (isProcessingScan) return;
-                        isProcessingScan = true;
-
-                        try {{
-                            if (typeof html5QrcodeScanner !== 'undefined' && html5QrcodeScanner) {{
-                                html5QrcodeScanner.clear();
-                            }}
-                        }} catch(e) {{}}
-
-                        setTimeout(function() {{
-                            redirectParentWithCode(decodedText);
-                        }}, 100);
-                    }}
-
-                    let html5QrcodeScanner = new Html5QrcodeScanner(
-                        "qr-reader",
-                        {{ fps: 10, qrbox: {{ width: 250, height: 250 }}, rememberLastUsedCamera: true }},
-                        /* verbose= */ false
-                    );
-                    html5QrcodeScanner.render(onScanSuccess);
-                </script>
-                """
-                st.components.v1.html(html5_code, height=440, scrolling=False)
+                if live_qr_scanner:
+                    scanned_code = live_qr_scanner(key="pos_live_scanner")
+                    if scanned_code:
+                        if st.session_state.get("last_live_scanned_code") != scanned_code:
+                            st.session_state["last_live_scanned_code"] = scanned_code
+                            matched_p = find_product_by_code(scanned_code, products)
+                            if matched_p:
+                                st.session_state["pending_scan_product"] = matched_p
+                            else:
+                                st.session_state["scan_error"] = f"❌ Scanned code '{scanned_code}' not found in catalog."
+                            st.rerun()
+                else:
+                    st.warning("⚠️ Live Scanner Component not loaded properly. Please run `npm run build` in scanner_component or check paths.")
 
             with scan_tab2:
                 st.markdown(f"""

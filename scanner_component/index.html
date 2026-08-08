@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Streamlit Scanner Component</title>
+    <script src="https://unpkg.com/html5-qrcode"></script>
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        font-family: sans-serif;
+        background-color: transparent;
+      }
+      #scanner-container {
+        background:#0b0f19;
+        padding:16px;
+        border-radius:12px;
+        text-align:center;
+        color:#f8fafc;
+        border:1px solid #1e293b;
+      }
+      #qr-reader {
+        width:100%;
+        max-width:400px;
+        margin:0 auto;
+        border-radius:8px;
+        overflow:hidden;
+      }
+      #qr-reader-results {
+        margin-top:12px;
+        font-weight:600;
+        font-size:14px;
+        color:#38bdf8;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="scanner-container">
+      <div id="qr-reader"></div>
+      <div id="qr-reader-results">🎥 Live Camera Active — Align Barcode or QR Code</div>
+    </div>
+
+    <script>
+      /**
+       * Send messages to the Streamlit parent window.
+       */
+      function sendMessageToStreamlitClient(type, data) {
+        var outData = Object.assign({
+          isStreamlitMessage: true,
+          type: type,
+        }, data);
+        window.parent.postMessage(outData, "*");
+      }
+
+      function init() {
+        sendMessageToStreamlitClient("streamlit:componentReady", {apiVersion: 1});
+      }
+
+      function setFrameHeight(height) {
+        sendMessageToStreamlitClient("streamlit:setFrameHeight", {height: height});
+      }
+
+      function sendValue(value) {
+        sendMessageToStreamlitClient("streamlit:setComponentValue", {value: value});
+      }
+
+      // The `data` argument can be any JSON-serializable value.
+      window.addEventListener("message", function(event) {
+        if (event.data.type === "streamlit:render") {
+          // You could pass arguments here if you want from python
+          setFrameHeight(document.body.scrollHeight);
+        }
+      });
+
+      init();
+      setFrameHeight(450);
+
+      let isProcessingScan = false;
+      let html5QrcodeScanner = null;
+
+      function onScanSuccess(decodedText, decodedResult) {
+        if (isProcessingScan) return;
+        isProcessingScan = true;
+
+        const resElem = document.getElementById("qr-reader-results");
+        if (resElem) {
+            resElem.innerHTML = '✅ Scanned: ' + decodedText + ' - Sending to POS...';
+        }
+
+        try {
+            if (html5QrcodeScanner) {
+                html5QrcodeScanner.clear();
+            }
+        } catch(e) {}
+
+        // Send value to streamlit
+        sendValue(decodedText);
+      }
+
+      window.onload = function() {
+          html5QrcodeScanner = new Html5QrcodeScanner(
+              "qr-reader",
+              { fps: 10, qrbox: { width: 250, height: 250 }, rememberLastUsedCamera: true },
+              /* verbose= */ false
+          );
+          html5QrcodeScanner.render(onScanSuccess);
+      };
+    </script>
+  </body>
+</html>
