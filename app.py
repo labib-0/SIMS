@@ -10,6 +10,9 @@ import plotly.graph_objects as go
 from datetime import datetime
 import os
 import textwrap
+import base64
+import json
+import hashlib
 
 import db
 import styles
@@ -86,6 +89,153 @@ def empty_plotly_chart(title: str = "", msg: str = "No data yet"):
         height=260,
     )
     return fig
+
+
+# ─────────────────────────────────────────────────────────────
+#  BARCODE & QR CODE HELPER FUNCTIONS
+# ─────────────────────────────────────────────────────────────
+
+def decode_barcode_or_qr_from_image(img_file):
+    """
+    Decodes barcodes (Code128, Code39, EAN, UPC, etc.) and QR codes from uploaded image or camera frame.
+    Returns list of unique decoded text strings.
+    """
+    scanned_results = []
+    if not img_file:
+        return scanned_results
+
+    try:
+        from PIL import Image
+        pil_img = Image.open(img_file)
+
+        # 1. Try zxingcpp on PIL image directly
+        try:
+            import zxingcpp
+            results = zxingcpp.read_barcodes(pil_img)
+            for r in results:
+                if r.text and r.text.strip():
+                    scanned_results.append(r.text.strip())
+        except Exception:
+            pass
+
+        # 2. Try converting PIL to grayscale / numpy array for zxingcpp
+        if not scanned_results:
+            try:
+                import zxingcpp
+                import numpy as np
+                np_img = np.array(pil_img.convert("L"))
+                results_np = zxingcpp.read_barcodes(np_img)
+                for r in results_np:
+                    if r.text and r.text.strip():
+                        scanned_results.append(r.text.strip())
+            except Exception:
+                pass
+
+        # 3. OpenCV QRCodeDetector fallback
+        if not scanned_results:
+            try:
+                import cv2
+                import numpy as np
+                cv_img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+                qr_detector = cv2.QRCodeDetector()
+                data, bbox, _ = qr_detector.detectAndDecode(cv_img)
+                if data and data.strip():
+                    scanned_results.append(data.strip())
+            except Exception:
+                pass
+
+    except Exception as e:
+        print(f"Barcode decode error: {e}")
+
+    return list(set(scanned_results))
+
+
+def process_scanned_code(code, products):
+    """
+    Matches scanned barcode/QR code (e.g. P001, EAN barcode, or JSON payload) with product catalog
+    and adds it to session_state.cart.
+    Returns (success: bool, message: str)
+    """
+    if not code:
+        return False, "No code provided."
+
+    clean_code = str(code).strip()
+
+    # Try parsing JSON if code is JSON payload like {"product_id": "P001"}
+    if clean_code.startswith("{") and clean_code.endswith("}"):
+        try:
+            data = json.loads(clean_code)
+            clean_code = data.get("product_id") or data.get("id") or data.get("code") or clean_code
+        except Exception:
+            pass
+
+    clean_code_lower = clean_code.lower()
+
+    # 1. Exact match on product_id
+    matched_p = None
+    for p in products:
+        if str(p["product_id"]).strip().lower() == clean_code_lower:
+            matched_p = p
+            break
+
+    # 2. Match on product name or partial product_id
+    if not matched_p:
+        for p in products:
+            if clean_code_lower == str(p["name"]).strip().lower():
+                matched_p = p
+                break
+
+    if not matched_p:
+        for p in products:
+            if clean_code_lower in str(p["product_id"]).strip().lower():
+                matched_p = p
+                break
+
+    if not matched_p:
+        return False, f"Product code '{clean_code}' not found in catalog."
+
+    # Check available stock
+    in_cart_qty = sum(item["quantity"] for item in st.session_state.cart if item["product_id"] == matched_p["product_id"])
+    eff_avail = int(matched_p["quantity"]) - in_cart_qty
+
+    if eff_avail <= 0:
+        return False, f"'{matched_p['name']}' ({matched_p['product_id']}) is out of stock!"
+
+    # Add to cart
+    found = False
+    for item in st.session_state.cart:
+        if item["product_id"] == matched_p["product_id"]:
+            item["quantity"] += 1
+            item["item_total"] = round(item["quantity"] * item["unit_price"], 2)
+            found = True
+            break
+
+    if not found:
+        st.session_state.cart.append({
+            "product_id": matched_p["product_id"],
+            "name":       matched_p["name"],
+            "unit_price": float(matched_p["price"]),
+            "quantity":   1,
+            "item_total": round(1.0 * float(matched_p["price"]), 2),
+        })
+
+    return True, f"Added 1× {matched_p['name']} (${float(matched_p['price']):.2f}) to cart!"
+
+
+def generate_barcode_svg_base64(code_text, format_type="qrcode"):
+    """
+    Generates a base64 Data URI for a QR code or 1D Barcode (Code128).
+    """
+    try:
+        import zxingcpp
+        fmt = zxingcpp.BarcodeFormat.QRCode if format_type == "qrcode" else zxingcpp.BarcodeFormat.Code128
+        bc = zxingcpp.create_barcode(code_text, fmt)
+        svg = zxingcpp.write_barcode_to_svg(bc)
+        b64 = base64.b64encode(svg.encode('utf-8')).decode('utf-8')
+        return f"data:image/svg+xml;base64,{b64}"
+    except Exception:
+        return ""
+
 
 
 # ─────────────────────────────────────────────────────────────
@@ -340,6 +490,26 @@ with hdr_col2:
 
 
 # ═══════════════════════════════════════════════════════════════
+#  QUERY PARAMETER BARCODE SCAN LISTENER
+# ═══════════════════════════════════════════════════════════════
+query_scan = st.query_params.get("scan") or st.query_params.get("barcode") or st.query_params.get("qr")
+if query_scan and st.session_state.get("authenticated"):
+    products_all = db.get_all_products()
+    success, msg = process_scanned_code(query_scan, products_all)
+    if success:
+        st.session_state["scan_toast"] = msg
+        st.session_state["current_page"] = "POS Terminal"
+    else:
+        st.session_state["scan_error"] = msg
+        st.session_state["current_page"] = "POS Terminal"
+    try:
+        st.query_params.clear()
+    except Exception:
+        pass
+    st.rerun()
+
+
+# ═══════════════════════════════════════════════════════════════
 #  PAGE ROUTING
 # ═══════════════════════════════════════════════════════════════
 
@@ -539,12 +709,153 @@ elif page == "POS Terminal":
     st.markdown(styles.render_section_title("POS Terminal & Checkout",
         icons.get_icon("pos", 20, t["accent"])), unsafe_allow_html=True)
 
+    if "scan_toast" in st.session_state and st.session_state.scan_toast:
+        st.toast(st.session_state.scan_toast, icon="🛒")
+        st.session_state.scan_toast = None
+
+    if "scan_error" in st.session_state and st.session_state.scan_error:
+        st.error(st.session_state.scan_error)
+        st.session_state.scan_error = None
+
     products = db.get_all_products()
     col_left, col_right = st.columns([1.6, 1])
 
     with col_left:
+        # ─────────────────────────────────────────────────────────────
+        #  BARCODE & QR CODE SCANNER EXPANDER
+        # ─────────────────────────────────────────────────────────────
+        with st.expander("📱 **Scan Barcode or QR Code (Phone Camera & Web)**", expanded=True):
+            scan_tab1, scan_tab2, scan_tab3, scan_tab4, scan_tab5 = st.tabs([
+                "📷 Photo Scan",
+                "⚡ Live HTML5 Camera",
+                "⌨️ Hardware / Manual",
+                "🏷️ Printable QR & Barcodes",
+                "📱 Phone & Vercel Guide"
+            ])
+
+            with scan_tab1:
+                st.markdown(f"""
+                    <div style="font-size:.85rem;color:{t['text_muted']};margin-bottom:8px;">
+                        Point your mobile camera or webcam at a product's Barcode or QR Code, then tap capture:
+                    </div>
+                """, unsafe_allow_html=True)
+                
+                cam_photo = st.camera_input("Take photo of Barcode / QR Code", key="pos_camera_photo_input")
+                if cam_photo:
+                    photo_bytes = cam_photo.getvalue()
+                    photo_hash = hashlib.md5(photo_bytes).hexdigest()
+                    if st.session_state.get("last_scanned_photo_hash") != photo_hash:
+                        st.session_state["last_scanned_photo_hash"] = photo_hash
+                        scanned_codes = decode_barcode_or_qr_from_image(cam_photo)
+                        if scanned_codes:
+                            added_any = False
+                            for code in scanned_codes:
+                                success, msg = process_scanned_code(code, products)
+                                if success:
+                                    st.toast(msg, icon="🛒")
+                                    added_any = True
+                                else:
+                                    st.error(msg)
+                            if added_any:
+                                st.rerun()
+                        else:
+                            st.warning("⚠️ No Barcode or QR code detected in photo. Ensure clear view and lighting.")
+
+            with scan_tab2:
+                st.markdown(f"""
+                    <div style="font-size:.85rem;color:{t['text_muted']};margin-bottom:10px;">
+                        <strong>Real-time Continuous Video Scan:</strong> Open video stream on phone browser to scan automatically.
+                    </div>
+                """, unsafe_allow_html=True)
+                html5_code = """
+                <div style="background:#0b0f19; padding:16px; border-radius:12px; text-align:center; color:#f8fafc; font-family:sans-serif; border:1px solid #1e293b;">
+                    <div id="qr-reader" style="width:100%; max-width:400px; margin:0 auto; border-radius:8px; overflow:hidden;"></div>
+                    <div id="qr-reader-results" style="margin-top:12px; font-weight:600; font-size:14px; color:#38bdf8;">🎥 Camera Initializing...</div>
+                </div>
+
+                <script src="https://unpkg.com/html5-qrcode"></script>
+                <script>
+                    function onScanSuccess(decodedText, decodedResult) {
+                        document.getElementById('qr-reader-results').innerText = '✅ Scanned: ' + decodedText;
+                        try {
+                            if (window.top) {
+                                const currentUrl = new URL(window.top.location.href);
+                                currentUrl.searchParams.set('scan', decodedText);
+                                window.top.location.href = currentUrl.toString();
+                            }
+                        } catch(e) {
+                            console.log('Redirecting fallback...', e);
+                        }
+                    }
+
+                    let html5QrcodeScanner = new Html5QrcodeScanner(
+                        "qr-reader",
+                        { fps: 10, qrbox: { width: 250, height: 250 }, rememberLastUsedCamera: true },
+                        /* verbose= */ false
+                    );
+                    html5QrcodeScanner.render(onScanSuccess);
+                </script>
+                """
+                st.components.v1.html(html5_code, height=440, scrolling=False)
+
+            with scan_tab3:
+                st.markdown(f"""
+                    <div style="font-size:.85rem;color:{t['text_muted']};margin-bottom:8px;">
+                        Scan with a USB / Bluetooth Barcode Scanner Gun or type product ID / name:
+                    </div>
+                """, unsafe_allow_html=True)
+                with st.form("manual_scan_form", clear_on_submit=True):
+                    scanned_input = st.text_input("Product Barcode or ID", placeholder="e.g. P001, P007...", label_visibility="collapsed")
+                    btn_manual = st.form_submit_button("🛒 Add Scanned Item to Cart", type="primary", use_container_width=True)
+                    if btn_manual and scanned_input:
+                        success, msg = process_scanned_code(scanned_input, products)
+                        if success:
+                            st.toast(msg, icon="🛒")
+                            st.rerun()
+                        else:
+                            st.error(msg)
+
+            with scan_tab4:
+                st.markdown(f"""
+                    <div style="font-size:.85rem;color:{t['text_muted']};margin-bottom:12px;">
+                        <strong>Product Barcodes & QR Codes Catalog:</strong> Scan these with your phone camera!
+                    </div>
+                """, unsafe_allow_html=True)
+                cols_b = st.columns(3)
+                for idx, p in enumerate(products[:12]):
+                    c_idx = idx % 3
+                    with cols_b[c_idx]:
+                        qr_uri = generate_barcode_svg_base64(p["product_id"], "qrcode")
+                        bc_uri = generate_barcode_svg_base64(p["product_id"], "code128")
+                        st.markdown(f"""
+                            <div style="background:{t['input_bg']};border:1px solid {t['card_border']};border-radius:12px;padding:12px;text-align:center;margin-bottom:12px;">
+                                <div style="font-weight:700;font-size:.9rem;color:{t['text_heading']};">{p['name']}</div>
+                                <div style="font-size:.75rem;color:{t['accent']};">{p['product_id']} — ${float(p['price']):.2f}</div>
+                                <div style="display:flex;justify-content:center;gap:6px;margin-top:8px;background:#ffffff;padding:8px;border-radius:8px;">
+                                    <img src="{qr_uri}" style="width:64px;height:64px;" title="QR Code: {p['product_id']}"/>
+                                    <img src="{bc_uri}" style="width:90px;height:64px;object-fit:contain;" title="Barcode: {p['product_id']}"/>
+                                </div>
+                            </div>
+                        """, unsafe_allow_html=True)
+
+            with scan_tab5:
+                st.markdown(f"""
+                    <div style="background:{t['card_bg']};border:1px solid {t['card_border']};border-radius:12px;padding:16px;color:{t['text_main']};">
+                        <h4 style="margin-top:0;color:{t['accent']};">📱 How to Scan Barcodes using Phone on Vercel</h4>
+                        <ol style="line-height:1.7;font-size:.9rem;padding-left:20px;">
+                            <li>Open your phone's web browser (<strong>Safari</strong> on iPhone or <strong>Chrome</strong> on Android).</li>
+                            <li>Visit your deployed Vercel URL (e.g., <code>https://your-sims-project.vercel.app</code>).</li>
+                            <li>Log in to SIMS and navigate to <strong>POS Terminal</strong>.</li>
+                            <li>Open the <strong>📱 Scan Barcode or QR Code</strong> section.</li>
+                            <li>Select <strong>📷 Photo Scan</strong> or <strong>⚡ Live HTML5 Camera</strong>.</li>
+                            <li>When prompted for camera permission, tap <strong>Allow</strong>.</li>
+                            <li>Point your phone camera at a product QR Code or Barcode. The item will automatically be added to your Shopping Cart!</li>
+                        </ol>
+                    </div>
+                """, unsafe_allow_html=True)
+
         st.markdown(f"""
-            <div class="section-title" style="font-size:.95rem;">
+            <div class="section-title" style="font-size:.95rem;margin-top:16px;">
                 {icons.get_icon("products",15,t["text_muted"])} &nbsp; Product Catalog
             </div>
         """, unsafe_allow_html=True)
